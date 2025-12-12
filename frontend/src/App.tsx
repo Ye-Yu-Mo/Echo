@@ -1,62 +1,42 @@
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { LoginView } from './views/LoginView';
+import { DashboardView } from './views/DashboardView';
+import { LectureDetailView } from './views/LectureDetailView';
 
-type WsStatus = 'idle' | 'connecting' | 'open' | 'closed' | 'error';
+function ProtectedRoute({ children }: { children: JSX.Element }) {
+  const token = localStorage.getItem('echo_token');
+  return token ? children : <Navigate to="/login" replace />;
+}
+
+function RootRedirect() {
+  const token = localStorage.getItem('echo_token');
+  return <Navigate to={token ? '/dashboard' : '/login'} replace />;
+}
 
 export function App() {
-  const [wsStatus, setWsStatus] = useState<WsStatus>('idle');
-  const [log, setLog] = useState<string[]>([]);
-  const socketRef = useRef<WebSocket | null>(null);
-
-  const wsBase = (import.meta.env.VITE_WS_BASE as string | undefined)?.replace(/\/$/, '') || 'ws://localhost:8000';
-
-  useEffect(() => {
-    return () => {
-      socketRef.current?.close();
-    };
-  }, []);
-
-  const connect = () => {
-    const url = `${wsBase}/ws/lectures/demo`;
-    const ws = new WebSocket(url);
-    socketRef.current = ws;
-    setWsStatus('connecting');
-
-    ws.onopen = () => setWsStatus('open');
-    ws.onclose = () => setWsStatus('closed');
-    ws.onerror = () => setWsStatus('error');
-    ws.onmessage = (ev) => {
-      setLog((prev) => [ev.data, ...prev].slice(0, 5));
-    };
-  };
-
   return (
-    <div class="page">
-      <header>
-        <h1>Echo MVP</h1>
-        <p>Preact + FastAPI skeleton。iOS 需 HTTPS 与用户手势开麦。</p>
-      </header>
-
-      <section class="card">
-        <h2>WebSocket 连通性</h2>
-        <p class="muted">当前状态：{wsStatus}（ws 基址：{wsBase}）</p>
-        <div class="actions">
-          <button onClick={connect} disabled={wsStatus === 'open' || wsStatus === 'connecting'}>
-            连接占位 WS
-          </button>
-        </div>
-        <ul class="log">
-          {log.map((line, idx) => (
-            <li key={idx}>{line}</li>
-          ))}
-        </ul>
-      </section>
-
-      <section class="card">
-        <h2>麦克风权限提示</h2>
-        <p class="muted">
-          真实链路需在用户手势下调用 getUserMedia，采集 16kHz mono PCM，0.5–2s 分片后走 WSS。
-        </p>
-      </section>
-    </div>
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<RootRedirect />} />
+        <Route path="/login" element={<LoginView />} />
+        <Route
+          path="/dashboard"
+          element={
+            <ProtectedRoute>
+              <DashboardView />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/lectures/:id"
+          element={
+            <ProtectedRoute>
+              <LectureDetailView />
+            </ProtectedRoute>
+          }
+        />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </BrowserRouter>
   );
 }

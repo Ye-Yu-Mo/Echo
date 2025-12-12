@@ -26,6 +26,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
     """Bearer Token鉴权中间件"""
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        # 跳过 OPTIONS 请求（CORS 预检）
+        if request.method == "OPTIONS":
+            return await call_next(request)
+
         # 排除不需要鉴权的路径（精确匹配，避免前缀误放行）
         if request.url.path in EXCLUDE_PATHS:
             return await call_next(request)

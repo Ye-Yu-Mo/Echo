@@ -4,6 +4,7 @@ import asyncio
 from typing import Any
 
 from fastapi import FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect, status
+from fastapi.middleware.cors import CORSMiddleware
 
 from echo.auth import login, logout
 from echo.db import close_pool, get_pool
@@ -13,6 +14,15 @@ from echo.models import CreateLectureRequest, LectureInfo, LoginRequest, TokenRe
 
 
 app = FastAPI(title="Echo Backend", version="0.1.0")
+
+# CORS 配置（开发环境）
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # 挂载鉴权中间件
 app.add_middleware(AuthMiddleware)

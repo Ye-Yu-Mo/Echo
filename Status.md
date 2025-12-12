@@ -66,10 +66,52 @@
 2. ⚠️ WS并发安全（房间set并发修改、广播无超时可能阻塞）
 3. ⚠️ shutdown阻塞（队列join可能卡死）
 
-#### M0前端（0%）
-- ❌ 登录页面
-- ❌ 路由守卫
-- ❌ Token持久化
+#### M0前端（100%）
+
+**技术栈迁移**：
+- ✅ Preact → React 19 + TypeScript
+- ✅ Tailwind CSS v3 + PostCSS + Autoprefixer
+- ✅ React Router v7（路由守卫）
+- ✅ lucide-react（图标库）
+
+**核心功能**：
+- ✅ 登录页面（src/views/LoginView.tsx）
+  - 用户名/密码表单
+  - 错误提示（网络/认证失败）
+  - 自动跳转到 Dashboard
+- ✅ Token持久化（localStorage）
+  - echo_token 存储
+  - echo_user 用户信息缓存
+- ✅ 路由守卫（App.tsx ProtectedRoute）
+  - 未登录自动跳转 /login
+  - 401 自动登出（api.ts）
+- ✅ Dashboard页面（src/views/DashboardView.tsx）
+  - 讲座列表（搜索/分页）
+  - 创建讲座（Modal + Form）
+  - FAB 浮动按钮
+  - 空状态提示
+- ✅ 讲座详情页（src/views/LectureDetailView.tsx）
+  - 标签页结构（字幕/总结/导出占位）
+  - 403/404 错误处理
+  - 加入讲座/结束讲座按钮（占位）
+- ✅ 国际化（src/i18n.ts）
+  - zh-CN/zh-TW/en 三语言支持
+  - LanguageSwitcher 组件
+- ✅ API客户端（src/api.ts）
+  - 自动 Bearer Token 注入
+  - 401 自动登出
+  - 统一错误处理
+
+**后端配置**：
+- ✅ CORS中间件（main.py）
+  - 允许 localhost:5173 跨域
+  - 支持 credentials
+- ✅ 数据库初始化
+  - 创建 echo 数据库
+  - 执行 schema.sql
+  - 修复管理员密码哈希（admin/admin123）
+- ✅ 环境变量（.env）
+  - DATABASE_URL 配置
 
 #### 其他
 - ✅ 项目脚手架（前后端目录结构、构建配置）

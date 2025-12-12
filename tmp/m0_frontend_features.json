@@ -1,0 +1,132 @@
+{
+  "M0_前端_基础设施搭建": {
+    "核心问题": "当前 frontend 只有 Preact 骨架,缺少 Tailwind、路由、图标库。原型用 React + Tailwind,需要在 Preact 下复刻。",
+    "解决方案": "保持 Preact 技术栈,安装 Tailwind CSS、preact-router、lucide-preact,配置环境变量。",
+    "子任务": {
+      "安装Tailwind": {
+        "描述": "安装 tailwindcss postcss autoprefixer,生成 tailwind.config.js 和 postcss.config.js,重写 index.css 为 Tailwind 基础样式",
+        "完成": false
+      },
+      "安装依赖": {
+        "描述": "安装 preact-router（路由）、lucide-preact（图标库,与 lucide-react 接口一致）",
+        "完成": false
+      },
+      "配置环境变量": {
+        "描述": "vite 中配置 VITE_API_BASE（默认 http://localhost:8000）",
+        "完成": false
+      }
+    },
+    "完成": false
+  },
+  "M0_前端_登录与鉴权": {
+    "核心功能": "登录页面、Token 持久化、路由守卫",
+    "参考": "tmp/index.js 的 LoginView 组件",
+    "子任务": {
+      "LoginView组件": {
+        "描述": "用户名/密码表单,调用 POST /api/auth/login,成功后保存 token 与 user_id/username/role 到 localStorage（key: echo_token / echo_user）,跳转到 /dashboard。【修改：后端返回扁平字段,无 user 对象】",
+        "API": "POST /api/auth/login { username: string, password: string } -> { token: string, user_id: number, username: string, role: string }【修改】",
+        "完成": false
+      },
+      "登录状态与错误处理【新增】": {
+        "描述": "提交时禁用按钮并显示 loading；401 返回时展示「用户名或密码错误」；网络异常/解析失败给出通用错误提示与重试；表单必填校验,支持 Enter 提交；错误/提示文案走 i18n。",
+        "完成": false
+      },
+      "Token持久化": {
+        "描述": "登录成功后存入 localStorage,每次 fetch 请求带 Authorization: Bearer {token}；若任意 API 返回 401（token 缺失/过期）清理 token 与用户缓存并跳转 /login；403 视为权限错误,保持登录态但提示并可跳回 /dashboard。【修改】",
+        "完成": false
+      },
+      "路由守卫": {
+        "描述": "创建 ProtectedRoute 组件（基于 preact-router）,未登录时重定向到 /login；初次加载使用 localStorage token 决定是否放行,首个受保护请求若 401 触发全局登出；/ 路由根据 token 存在性重定向到 /login 或 /dashboard。【修改】",
+        "完成": false
+      },
+      "登出": {
+        "描述": "调用 POST /api/auth/logout,清除 localStorage 的 token（无论接口是否返回 404）,跳转到 /login；接口需要 Authorization: Bearer {token},后端对错误头返回 400。【修改】",
+        "API": "POST /api/auth/logout（需要 Bearer Token）-> { message: string },404 表示 token 已失效【修改】",
+        "完成": false
+      }
+    },
+    "完成": false
+  },
+  "M0_前端_讲座管理": {
+    "核心功能": "讲座列表、创建讲座、查看详情",
+    "参考": "tmp/index.js 的 DashboardView 和 LectureDetailView",
+    "子任务": {
+      "DashboardView组件": {
+        "描述": "展示讲座列表（GET /api/lectures）,使用 limit/offset 分页或"加载更多",后端不返回 total；点击卡片跳转详情,FAB 按钮创建新讲座。【修改：后端无 page/page_size,仅 limit/offset】",
+        "API": "GET /api/lectures?limit=20&offset=0 -> LectureInfo[]【修改：无 total/page 字段,按创建时间倒序】",
+        "完成": false
+      },
+      "Dashboard状态处理【新增】": {
+        "描述": "列表首次加载显示 skeleton/spinner；空列表显示"暂无讲座"并提供创建入口；请求失败（网络/4xx/5xx）提示错误并可点击重试；401/403 走全局处理（403 提示无权限）。",
+        "完成": false
+      },
+      "创建讲座": {
+        "描述": "点击 FAB,输入标题后调用 POST /api/lectures,成功后跳转到新讲座详情页（保持 M1 前不进入 Live Session）；提交时显示 loading/禁用,失败时提示；title 长度 1-255,后端 201 返回 LectureInfo。【修改】",
+        "API": "POST /api/lectures { title: string } -> { id: number, title: string, creator_id: number, status: \"init\"|\"recording\"|\"summarizing\"|\"done\", created_at: string, ended_at: string | null }【修改：返回字段包含 status/creator_id,HTTP 201】",
+        "完成": false
+      },
+      "LectureDetailView组件": {
+        "描述": "展示讲座标题、创建时间、状态（根据 status/ended_at 推导进行中/已结束）,tabs 切换（逐字稿/总结/导出）占位；需要加载态,404 显示"讲座不存在",403 提示无权限并可返回列表。【修改：状态取值 init|recording|summarizing|done】",
+        "API": "GET /api/lectures/{id} -> LectureInfo【修改：含 status/creator_id/ended_at】",
+        "完成": false
+      },
+      "LectureDetail状态处理【新增】": {
+        "描述": "详情加载显示 skeleton；接口报错时展示错误组件（401/403/404 分流）；数据为空不会出现,但需要兜底渲染错误提示；允许手动刷新。",
+        "完成": false
+      },
+      "修改标题": {
+        "描述": "点击标题旁编辑按钮占位,当前后端没有 PATCH /api/lectures/{id},M0 禁用提交或仅展示提示,待确认后端支持后再启用。【修改：暂不调用不存在的接口】",
+        "API": "PATCH /api/lectures/{id} { title?: string } -> Lecture（后端未实现,留空占位）【修改】",
+        "完成": false
+      }
+    },
+    "完成": false
+  },
+  "M0_前端_多语言支持": {
+    "核心功能": "简体中文、繁体中文、英文切换",
+    "参考": "tmp/index.js 的 TRANSLATIONS 和 LanguageSwitcher",
+    "子任务": {
+      "i18n模块": {
+        "描述": "创建 src/i18n.ts,定义 TRANSLATIONS（简繁英）,提供 t(key) 和 setLang(lang),lang 保存到 localStorage；包含错误/加载/空状态文案,缺失 key 回退到 zh-CN。【修改】",
+        "完成": false
+      },
+      "LanguageSwitcher组件": {
+        "描述": "右上角语言切换按钮（简/繁/EN）,点击切换语言",
+        "完成": false
+      },
+      "文案覆盖检查【新增】": {
+        "描述": "为新增的错误提示、加载态、空态、按钮文案补齐三语翻译,新增 key 记录在 TRANSLATIONS 中并在构建时校验缺失时使用默认语言。",
+        "完成": false
+      }
+    },
+    "完成": false
+  },
+  "M0_前端_路由结构": {
+    "核心功能": "定义路由,未登录拦截",
+    "路由表": {
+      "/": "重定向到 /login（未登录）或 /dashboard（已登录）【修改：基于 localStorage token,后续 401 统一登出】",
+      "/login": "登录页面（公开）",
+      "/dashboard": "讲座列表（需登录）",
+      "/lectures/:id": "讲座详情（需登录）",
+      "/*": "通配符 404 页面,提供返回 /dashboard 链接【新增】"
+    },
+    "完成": false
+  },
+  "M0_前端_API客户端封装": {
+    "核心功能": "封装 fetch,自动带 Token,处理错误",
+    "子任务": {
+      "api模块": {
+        "描述": "创建 src/api.ts,封装 GET/POST/PATCH/DELETE,自动从 localStorage 读 token 并加 Authorization: Bearer；401 触发清理 token + 跳转 /login；403 返回业务错误提示页面处理；对网络错误/超时/非 JSON 返回包装统一错误对象；使用 VITE_API_BASE；提供 limit/offset helper 适配 /api/lectures；正确处理 201/204 响应。【修改】",
+        "完成": false
+      },
+      "错误与状态约定【新增】": {
+        "描述": "约定返回 { data, error, status } 供组件展示 loading/empty/error；统一 toast 钩子与错误消息转换（含 400/404/500）；401/403 交给全局 handler,其他错误可重试。",
+        "完成": false
+      }
+    },
+    "完成": false
+  },
+  "M0_前端_占位实现说明": {
+    "说明": "M0 阶段不实现 Live Session（实时录音字幕）,不实现总结/导出功能,这些在 M1/M2/M3 阶段完成。M0 只做登录+讲座列表+讲座详情页面框架（tabs 占位但不填充内容）。【修改：后端存在 /api/lectures/{id}/join、/end 与 /ws/lectures/{id},M0 不调用】"
+  }
+}

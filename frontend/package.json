@@ -8,12 +8,18 @@
     "build": "vite build",
     "preview": "vite preview"
   },
-  "dependencies": {
-    "preact": "^10.19.4"
-  },
   "devDependencies": {
-    "@preact/preset-vite": "^2.10.2",
+    "@vitejs/plugin-react": "^5.1.2",
+    "autoprefixer": "^10.4.22",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^3.4.19",
     "typescript": "^5.3.3",
     "vite": "^7.2.6"
+  },
+  "dependencies": {
+    "lucide-react": "^0.560.0",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
+    "react-router-dom": "^7.10.1"
   }
 }
