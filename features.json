@@ -34,59 +34,88 @@
         "description": "本地磁盘存储 exports/ uploads/（路径穿越防护：..和绝对路径检查+resolve二次验证），过期清理（7天），save_file/get_file_path/delete_file",
         "finish": true
       },
+      "前端_技术栈迁移": {
+        "description": "Preact → React 19 + TypeScript + Tailwind CSS v3 + React Router v7 + lucide-react",
+        "finish": true
+      },
       "前端_登录页面": {
-        "description": "用户名/密码表单，登录成功后持久化Token（localStorage）",
-        "finish": false
+        "description": "用户名/密码表单（LoginView.tsx），错误提示（网络/认证失败），登录成功后持久化Token（localStorage），自动跳转Dashboard",
+        "finish": true
       },
       "前端_路由守卫": {
-        "description": "未登录时拦截所有页面跳转到登录页",
-        "finish": false
+        "description": "未登录时拦截所有页面跳转到登录页（ProtectedRoute），401自动登出",
+        "finish": true
+      },
+      "前端_Dashboard页面": {
+        "description": "讲座列表（搜索/分页），创建讲座Modal，FAB浮动按钮，空状态提示",
+        "finish": true
+      },
+      "前端_讲座详情页": {
+        "description": "标签页结构（字幕/总结/导出占位），403/404错误处理，加入/结束讲座按钮（占位）",
+        "finish": true
+      },
+      "前端_国际化": {
+        "description": "zh-CN/zh-TW/en三语言支持（i18n.ts），LanguageSwitcher组件，切换后自动刷新",
+        "finish": true
+      },
+      "前端_API客户端": {
+        "description": "统一API客户端（api.ts），自动Bearer Token注入，401自动登出，统一错误处理",
+        "finish": true
+      },
+      "后端_CORS配置": {
+        "description": "CORSMiddleware允许localhost:5173跨域，支持credentials，OPTIONS预检跳过认证",
+        "finish": true
+      },
+      "后端_密码哈希修复": {
+        "description": "修复schema.sql中admin账号bcrypt哈希（admin/admin123）",
+        "finish": true
       }
     },
-    "finish": false,
-    "notes": "后端90%完成，已修复5个安全漏洞（路径穿越、越权、唯一约束、时序攻击、路径误放行），待修复3个稳定性问题（DB异常处理、WS并发安全、shutdown阻塞）"
+    "finish": true,
+    "notes": "M0前后端100%完成。后端：已修复5个安全漏洞（路径穿越、越权、唯一约束、时序攻击、路径误放行）+ CORS配置 + OPTIONS预检跳过认证，待修复3个稳定性问题（DB异常处理、WS并发安全、shutdown阻塞）。前端：React技术栈迁移，登录/路由守卫/Dashboard/讲座详情/国际化全部完成。"
   },
   "M1_实时英文字幕": {
-    "core": "客户端采集音频→WS推送→后端Whisper ASR→广播EN字幕→异步落库",
+    "core": "客户端采集16kHz mono PCM（0.5–2s分片）→ WSS 推送 → 后端 Whisper 本地推理（small默认，medium可选，GPU优先）→ 广播 EN 字幕（带 seq/时间戳）→ 异步落库 utterance(source='realtime')",
     "sub_features": {
       "后端_Whisper集成": {
-        "description": "本地Whisper推理（small/medium模型），输入PCM音频帧，输出EN文本+时间戳",
-        "finish": false
+        "description": "单实例加载 Whisper small（默认）/medium（env 可切换），GPU 可用时启用 FP16；接口接收 16kHz mono PCM int16，小于 2s；启动预热；推理超时与错误码（2001 asr_failed，4001 server_busy）；CPU 降级提示延迟；空帧/纯静音直接丢弃。新增 backend/src/echo/asr.py",
+        "finish": true
       },
       "后端_WS房间管理": {
-        "description": "lecture_id→连接集合映射，支持多客户端订阅同一讲座",
-        "finish": false
+        "description": "lecture_id→连接集合，asyncio.Lock 保证并发安全；广播 send_json 加 2–3s 超时，失败剔除；ping/pong 30s；连接上限与节流（过大帧/过高 QPS 返回 error+close 1008）。扩展 backend/src/echo/ws.py",
+        "finish": true
       },
       "后端_seq生成": {
-        "description": "每个讲座seq单调递增，广播时带seq保证顺序",
-        "finish": false
+        "description": "每 lecture 维护内存计数器+锁，初始从 DB max(seq) where source='realtime' 读取；每条字幕 seq 自增，保证单调；重复 seq on conflict 忽略/记录；重启后可恢复；广播与落库使用同一 seq",
+        "finish": true
       },
       "后端_广播EN字幕": {
-        "description": "ASR完成后广播{lecture_id, seq, start_ms, end_ms, text_en}到所有连接",
-        "finish": false
+        "description": "统一消息格式 {type:'subtitle', lecture_id, seq, start_ms, end_ms, text_en}; 出错时 {type:'error', code, message}; 连接成功 {type:'info'}；ping 保留 type:'ping'；字幕发送给房间所有连接（含发送者）",
+        "finish": true
       },
       "后端_异步落库utterance": {
-        "description": "字幕写入utterance表（队列或后台任务），source='realtime'，避免阻塞广播",
-        "finish": false
+        "description": "ASR 完成先广播，再通过任务队列写 utterances(lecture_id, seq, start_ms, end_ms, text_en, source='realtime'); DB 插入用 ON CONFLICT(lecture_id,seq,source) DO NOTHING/LOG；落库失败仅告警不影响广播；可选批量 flush。新增 backend/src/echo/utterances.py",
+        "finish": true
       },
       "前端_麦克风采集": {
-        "description": "用户手势触发getUserMedia，16kHz mono PCM，0.5–2s分片",
-        "finish": false
+        "description": "用户手势触发 getUserMedia，HTTPS/WSS；Web Audio + AudioWorklet/ScriptProcessor 下采样至 16kHz mono int16；分片 500–2000ms；权限/设备缺失友好提示；静音帧可合并或跳过",
+        "finish": true
       },
       "前端_WSS推送音频": {
-        "description": "通过WSS发送二进制音频帧，带Token鉴权",
-        "finish": false
+        "description": "wss://.../ws/lectures/{id}?token=xxx；握手后每帧直接发送二进制 PCM；收到 ping 回复 'pong'；断线自动指数退避重连，重连后重新加入房间；发送队列限速/丢弃策略，超时提示用户",
+        "finish": true
       },
       "前端_字幕显示_EN": {
-        "description": "实时显示英文字幕，先不显示中文",
-        "finish": false
+        "description": "订阅 subtitle 流，按 seq 有序渲染（乱序时重排）；自动滚动，保留最近 N 条；错误/info 提示；无需中文",
+        "finish": true
       },
       "前端_讲座管理": {
-        "description": "创建/加入讲座，结束按钮",
-        "finish": false
+        "description": "详情页增加"开始采集/停止"按钮、录音状态、延迟/连接状态；结束按钮调用 POST /api/lectures/{id}/end；403/404 处理沿用 M0",
+        "finish": true
       }
     },
-    "finish": false
+    "finish": true,
+    "notes": "M1 100%完成。后端：Whisper ASR（faster-whisper + GPU/FP16）、seq生成（从DB恢复+锁保护）、广播（超时+失败剔除）、异步落库（psycopg3 %s占位符）。前端：麦克风采集（ScriptProcessorNode 16kHz mono）、WSS推送、字幕显示（自动滚动+seq排序）、录音状态UI。已修复：SQL占位符错误、WebSocket重复关闭。"
   },
   "M2_中译与推送": {
     "core": "在M1基础上接入百度翻译，广播EN+ZH双语字幕",

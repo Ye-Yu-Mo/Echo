@@ -1,7 +1,20 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import os
+from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
+
+# 加载 .env 文件（必须在其他导入之前）
+try:
+    from dotenv import load_dotenv
+    env_path = Path(__file__).parent.parent.parent / ".env"
+    load_dotenv(env_path)
+except ImportError:
+    pass
 
 from fastapi import FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -30,13 +43,15 @@ app.add_middleware(AuthMiddleware)
 
 @app.on_event("startup")
 async def startup() -> None:
-    """应用启动时初始化连接池、任务队列和存储目录"""
+    """应用启动时初始化连接池、任务队列、存储目录和 ASR"""
+    from echo.asr import init_asr
     from echo.storage import init_storage
     from echo.tasks import start_workers
 
     get_pool()  # 触发连接池创建
     start_workers(num_workers=2)  # 启动2个worker
     init_storage()  # 初始化存储目录
+    init_asr()  # 初始化 Whisper 模型
 
 
 @app.on_event("shutdown")
@@ -175,6 +190,51 @@ async def api_end_lecture(lecture_id: int, request: Request) -> dict[str, str]:
     return {"message": "Lecture ended, summary task triggered"}
 
 
+@app.get("/api/lectures/{lecture_id}/utterances")
+async def api_get_utterances(
+    lecture_id: int,
+    request: Request,
+    source: str = "realtime",
+    limit: int = 1000,
+    offset: int = 0
+) -> list[dict[str, Any]]:
+    """获取讲座的历史字幕列表（仅创建者可见）"""
+    from echo.utterances import list_utterances
+
+    # 检查讲座是否存在
+    result = await get_lecture(lecture_id)
+    if not result:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Lecture not found",
+        )
+
+    # 权限检查：仅创建者可见
+    user = request.state.user
+    if result["creator_id"] != user["user_id"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied",
+        )
+
+    # 查询字幕列表
+    pool = get_pool()
+    utterances = await list_utterances(pool, lecture_id, source, limit, offset)
+
+    # 转换为与 WebSocket 消息一致的格式
+    return [
+        {
+            "type": "subtitle",
+            "lecture_id": lecture_id,
+            "seq": u["seq"],
+            "start_ms": u["start_ms"],
+            "end_ms": u["end_ms"],
+            "text_en": u["text_en"],
+        }
+        for u in utterances
+    ]
+
+
 @app.websocket("/ws/lectures/{lecture_id}")
 async def lecture_socket(websocket: WebSocket, lecture_id: int) -> None:
     """
@@ -182,8 +242,14 @@ async def lecture_socket(websocket: WebSocket, lecture_id: int) -> None:
 
     鉴权：query参数传token，如 ws://...?token=xxx
     心跳：服务端每30s发ping，客户端应回pong
+    消息格式：
+      - 入站：二进制PCM帧（16kHz mono int16）或文本"pong"
+      - 出站：{type:'info'|'subtitle'|'error'|'ping', ...}
     """
-    from echo.ws import authenticate_ws, broadcast, heartbeat, join_room, leave_room
+    from echo.asr import transcribe
+    from echo.tasks import submit_task
+    from echo.utterances import create_utterance
+    from echo.ws import authenticate_ws, broadcast, heartbeat, init_seq_counter, join_room, leave_room, next_seq
 
     await websocket.accept()
 
@@ -199,11 +265,23 @@ async def lecture_socket(websocket: WebSocket, lecture_id: int) -> None:
         await websocket.close(code=1008, reason="Lecture not found")
         return
 
+    # 权限检查：仅创建者可加入（M1暂不支持多用户）
+    if lecture["creator_id"] != user_info["user_id"]:
+        await websocket.close(code=1008, reason="Access denied")
+        return
+
+    # 初始化 seq 计数器（从 DB 恢复）
+    pool = get_pool()
+    await init_seq_counter(lecture_id, pool)
+
     # 加入房间
-    join_room(lecture_id, websocket)
+    await join_room(lecture_id, websocket)
 
     # 启动心跳任务
     heartbeat_task = asyncio.create_task(heartbeat(websocket))
+
+    # 时间戳累加器（用于生成 start_ms/end_ms）
+    cumulative_ms = 0
 
     try:
         # 发送欢迎消息
@@ -213,7 +291,7 @@ async def lecture_socket(websocket: WebSocket, lecture_id: int) -> None:
             "user": user_info["username"],
         })
 
-        # 接收音频帧（M1实现，现在先echo测试）
+        # 接收音频帧并处理
         while True:
             data = await websocket.receive()
 
@@ -221,30 +299,63 @@ async def lecture_socket(websocket: WebSocket, lecture_id: int) -> None:
             if "text" in data:
                 msg = data["text"]
                 if msg == "pong":
-                    continue  # 忽略pong
+                    continue
 
             # 处理音频帧（二进制）
             if "bytes" in data:
                 frame = data["bytes"]
-                # TODO M1: Whisper ASR → 翻译 → 广播字幕
-                # 占位：echo测试
-                await websocket.send_json({
+
+                # ASR 转录
+                result = await transcribe(frame)
+
+                # 处理错误
+                if result.get("code") == 2001:
+                    await websocket.send_json({
+                        "type": "error",
+                        "code": 2001,
+                        "message": result.get("error", "ASR failed")
+                    })
+                    continue
+
+                # 静音/无内容，跳过
+                text = result.get("text", "")
+                if not text:
+                    continue
+
+                # 生成 seq
+                seq = await next_seq(lecture_id)
+
+                # 计算时间戳（假设每帧 1s，实际应从音频长度计算）
+                frame_duration_ms = len(frame) // 32  # 16kHz mono int16 = 32 bytes/ms
+                start_ms = cumulative_ms
+                end_ms = cumulative_ms + frame_duration_ms
+                cumulative_ms = end_ms
+
+                # 广播字幕
+                subtitle_msg = {
                     "type": "subtitle",
                     "lecture_id": lecture_id,
-                    "seq": 0,
-                    "start_ms": 0,
-                    "end_ms": 0,
-                    "text_en": f"Received {len(frame)} bytes",
-                    "text_zh": "占位翻译",
-                })
+                    "seq": seq,
+                    "start_ms": start_ms,
+                    "end_ms": end_ms,
+                    "text_en": text
+                }
+                await broadcast(lecture_id, subtitle_msg)
+
+                # 异步落库（不阻塞）
+                submit_task(create_utterance, pool, lecture_id, seq, start_ms, end_ms, text, source="realtime")
 
     except WebSocketDisconnect:
         pass
     except Exception as exc:
-        await websocket.close(code=1011, reason=str(exc))
+        logger.error(f"WebSocket error: {exc}", exc_info=True)
+        try:
+            await websocket.close(code=1011, reason=str(exc))
+        except Exception:
+            pass  # 连接可能已关闭
     finally:
         # 清理：离开房间，取消心跳
-        leave_room(lecture_id, websocket)
+        await leave_room(lecture_id, websocket)
         heartbeat_task.cancel()
 
 

@@ -4,7 +4,7 @@
 
 ### 已完成
 
-#### M0后端基础设施（90%）
+#### M0后端基础设施（100%）
 
 **数据层**：
 - ✅ schema.sql：6张表（user/lecture/utterance/summary/export_job/audio_upload）
@@ -60,6 +60,7 @@
 3. ✅ summaries唯一约束缺失（部分索引WHERE is_latest = TRUE）
 4. ✅ 时序攻击漏洞（auth.py假hash恒定时间）
 5. ✅ 路径前缀误放行（middleware.py精确匹配）
+6. ✅ CORS预检失败（middleware.py跳过OPTIONS请求认证）
 
 **待修复的稳定性问题**（不影响基本功能）：
 1. ⚠️ DB异常处理缺失（连接异常未捕获，可能污染连接池）
@@ -106,6 +107,7 @@
 - ✅ CORS中间件（main.py）
   - 允许 localhost:5173 跨域
   - 支持 credentials
+  - OPTIONS预检跳过认证（middleware.py）
 - ✅ 数据库初始化
   - 创建 echo 数据库
   - 执行 schema.sql
@@ -117,16 +119,58 @@
 - ✅ 项目脚手架（前后端目录结构、构建配置）
 - ✅ 文档（需求、开发文档、开发步骤、Status、features.json）
 - ✅ .env.example环境变量模板
+- ✅ python-dotenv集成（自动加载.env文件）
+
+#### M1：实时英文字幕（100%）
+
+**后端实现**：
+- ✅ Whisper ASR 模块（backend/src/echo/asr.py）
+  - faster-whisper 优先，fallback openai-whisper
+  - GPU/FP16 自动检测（CUDA/MPS/CPU）
+  - 简单 VAD（能量阈值过滤静音）
+  - 推理超时（8s）与错误处理
+  - 线程池异步执行（不阻塞事件循环）
+- ✅ seq 生成机制（backend/src/echo/ws.py）
+  - 每 lecture 内存计数器 + asyncio.Lock
+  - 启动时从 DB 恢复 max(seq)
+  - 单调递增，保证顺序
+- ✅ WebSocket 房间管理（backend/src/echo/ws.py）
+  - asyncio.Lock 保护并发修改
+  - 广播带 3s 超时，失败自动剔除
+  - 心跳机制（30s ping/pong）
+- ✅ 异步落库（backend/src/echo/utterances.py）
+  - 通过任务队列写入 utterances 表
+  - ON CONFLICT DO NOTHING 处理重复 seq
+  - psycopg3 占位符（%s 而非 $1）
+- ✅ WebSocket 端点集成（backend/src/echo/main.py）
+  - 鉴权 + 权限检查
+  - 接收 PCM 帧 → ASR → 广播 → 落库
+  - 时间戳累加计算
+  - 异常处理（避免重复关闭）
+
+**前端实现**：
+- ✅ 麦克风采集（frontend/src/utils/audio.ts）
+  - getUserMedia 权限请求
+  - ScriptProcessorNode 处理音频
+  - 下采样到 16kHz mono PCM int16
+  - 1s 分片缓冲
+  - Float32 → Int16 转换
+- ✅ WebSocket 客户端（frontend/src/utils/ws.ts）
+  - 自动重连（指数退避，最大 30s）
+  - 心跳响应（pong）
+  - 消息类型处理（subtitle/error/info/ping）
+- ✅ 讲座详情页集成（frontend/src/views/LectureDetailView.tsx）
+  - 录音控制按钮（麦克风图标）
+  - 连接状态显示（WiFi 图标）
+  - 字幕列表（自动滚动）
+  - 按 seq 排序渲染
+  - 错误提示
+
+**已修复的问题**：
+- ✅ SQL 占位符错误（psycopg3 使用 %s）
+- ✅ WebSocket 重复关闭（异常处理）
 
 ### 未完成
-
-#### M1：实时英文字幕（0%）
-- ❌ Whisper ASR集成
-- ❌ seq生成与广播逻辑
-- ❌ 异步落库utterance（含source='realtime'）
-- ❌ 前端麦克风采集（16kHz mono PCM）
-- ❌ 前端WSS推送音频帧
-- ❌ 前端字幕显示（EN）
 
 #### M2：中译与推送（0%）
 - ❌ 百度翻译API集成
@@ -155,33 +199,17 @@
 
 ## 下一步计划
 
-### 立即修复（稳定性问题，预计0.5天）
+### 立即修复（稳定性问题）
 1. DB异常处理：捕获psycopg异常，确保连接池不被污染
-2. WS并发安全：使用asyncio.Lock保护房间修改，广播加超时
+2. WS并发安全：已修复（asyncio.Lock）
 3. shutdown优化：先取消workers再join队列，避免卡死
 
-### M0前端（预计1天）
-1. 登录页面（用户名/密码表单）
-2. Token持久化（localStorage）
-3. 路由守卫（未登录拦截）
-4. 讲座列表/详情页面（调用后端API）
-
-### M1：实时英文字幕（预计3–4天）
-1. Whisper本地推理集成（small/medium模型）
-2. WS房间管理（lecture_id→连接集合）
-3. seq单调递增生成
-4. 前端麦克风采集（16kHz mono PCM，0.5–2s分片）
-5. 前端WSS推送音频帧
-6. 后端接收→ASR→广播EN字幕
-7. 异步落库utterance
-8. 前端字幕显示（先只显示EN）
-
-### M2：中译与推送（预计1–2天）
+### M2：中译与推送
 1. 百度翻译API集成（批量/分段/重试）
 2. 后端广播EN+ZH字幕
 3. 前端双列显示英/中
 
-### M3：总结与导出（预计3–5天）
+### M3：总结与导出
 1. `/api/lectures/{id}/end` 触发总结任务
 2. DeepSeek LLM集成（摘要/要点/QA/提纲）
 3. `/api/lectures/{id}/summaries` 查询接口
@@ -190,7 +218,7 @@
 6. 前端总结展示页
 7. 前端Markdown预览与下载
 
-### M4：弱网补传与运维（预计2–3天）
+### M4：弱网补传与运维
 1. HTTP上传整段音频接口
 2. 后台重跑ASR+翻译
 3. 监控指标（/metrics）
@@ -209,4 +237,8 @@
 
 ## 总工期估算
 
-MVP首版预计**10–16天**（按串行开发）。并行开发可缩短至**7–10天**。
+**已完成**：
+- M0（前后端基础设施 + 登录鉴权 + 讲座管理 + 前端框架迁移 + Dashboard）
+- M1（实时英文字幕 + Whisper ASR + WebSocket + 前端录音）
+
+**剩余工期**：MVP首版预计**6–12天**（按串行开发）。并行开发可缩短至**4–8天**。
