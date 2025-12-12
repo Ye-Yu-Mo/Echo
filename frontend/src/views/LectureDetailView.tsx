@@ -347,11 +347,16 @@ export function LectureDetailView() {
                         <div className="flex-shrink-0 w-12 text-xs text-slate-500 font-mono pt-1">
                           #{subtitle.seq}
                         </div>
-                        <div className="flex-1">
+                        <div className="flex-1 space-y-2">
                           <p className={`leading-relaxed ${isActive ? 'text-blue-900 font-medium' : 'text-slate-800'}`}>
                             {subtitle.text_en}
                           </p>
-                          <p className="text-xs text-slate-400 mt-2">
+                          {subtitle.text_zh && (
+                            <p className={`leading-relaxed text-sm ${isActive ? 'text-blue-700' : 'text-slate-600'}`}>
+                              {subtitle.text_zh}
+                            </p>
+                          )}
+                          <p className="text-xs text-slate-400">
                             {Math.floor(subtitle.start_ms / 1000)}s - {Math.floor(subtitle.end_ms / 1000)}s
                           </p>
                         </div>

@@ -6,7 +6,7 @@
  */
 
 const TARGET_SAMPLE_RATE = 16000;
-const FRAME_SIZE_MS = 1000; // 1 second per frame
+const FRAME_SIZE_MS = 3000; // 3 seconds per frame
 
 export type AudioDataCallback = (pcm: ArrayBuffer) => void;
 

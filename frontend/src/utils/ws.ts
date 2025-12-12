@@ -12,6 +12,7 @@ export interface SubtitleMessage {
   start_ms: number;
   end_ms: number;
   text_en: string;
+  text_zh?: string;
 }
 
 export interface ErrorMessage {

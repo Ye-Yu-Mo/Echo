@@ -230,6 +230,7 @@ async def api_get_utterances(
             "start_ms": u["start_ms"],
             "end_ms": u["end_ms"],
             "text_en": u["text_en"],
+            "text_zh": u["text_zh"],
         }
         for u in utterances
     ]
@@ -248,6 +249,7 @@ async def lecture_socket(websocket: WebSocket, lecture_id: int) -> None:
     """
     from echo.asr import transcribe
     from echo.tasks import submit_task
+    from echo.translate import translate_text
     from echo.utterances import create_utterance
     from echo.ws import authenticate_ws, broadcast, heartbeat, init_seq_counter, join_room, leave_room, next_seq
 
@@ -318,9 +320,17 @@ async def lecture_socket(websocket: WebSocket, lecture_id: int) -> None:
                     continue
 
                 # 静音/无内容，跳过
-                text = result.get("text", "")
-                if not text:
+                text_en = result.get("text", "")
+                if not text_en:
                     continue
+
+                # 翻译成中文（M2）
+                translate_result = await translate_text(text_en)
+                text_zh = translate_result.get("text", "")
+
+                # 处理翻译错误（不阻塞流程，仅记录）
+                if translate_result.get("code") == 3001:
+                    logger.warning(f"Translation failed: {translate_result.get('error')}")
 
                 # 生成 seq
                 seq = await next_seq(lecture_id)
@@ -331,19 +341,20 @@ async def lecture_socket(websocket: WebSocket, lecture_id: int) -> None:
                 end_ms = cumulative_ms + frame_duration_ms
                 cumulative_ms = end_ms
 
-                # 广播字幕
+                # 广播双语字幕
                 subtitle_msg = {
                     "type": "subtitle",
                     "lecture_id": lecture_id,
                     "seq": seq,
                     "start_ms": start_ms,
                     "end_ms": end_ms,
-                    "text_en": text
+                    "text_en": text_en,
+                    "text_zh": text_zh,
                 }
                 await broadcast(lecture_id, subtitle_msg)
 
                 # 异步落库（不阻塞）
-                submit_task(create_utterance, pool, lecture_id, seq, start_ms, end_ms, text, source="realtime")
+                submit_task(create_utterance, pool, lecture_id, seq, start_ms, end_ms, text_en, text_zh, source="realtime")
 
     except WebSocketDisconnect:
         pass

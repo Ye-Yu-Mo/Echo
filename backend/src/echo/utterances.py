@@ -16,6 +16,7 @@ async def create_utterance(
     start_ms: int,
     end_ms: int,
     text_en: str,
+    text_zh: str = "",
     source: str = "realtime"
 ) -> None:
     """
@@ -28,16 +29,17 @@ async def create_utterance(
         start_ms: 开始时间（毫秒）
         end_ms: 结束时间（毫秒）
         text_en: 英文文本
+        text_zh: 中文翻译（可选）
         source: 来源（realtime/reprocess）
     """
     sql = """
-        INSERT INTO utterances (lecture_id, seq, start_ms, end_ms, text_en, source)
-        VALUES (%s, %s, %s, %s, %s, %s)
+        INSERT INTO utterances (lecture_id, seq, start_ms, end_ms, text_en, text_zh, source)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (lecture_id, seq, source) DO NOTHING
     """
     try:
         async with pool.connection() as conn:
-            await conn.execute(sql, (lecture_id, seq, start_ms, end_ms, text_en, source))
+            await conn.execute(sql, (lecture_id, seq, start_ms, end_ms, text_en, text_zh, source))
     except Exception as exc:
         logger.error(f"Failed to create utterance: {exc}", exc_info=True)
 
