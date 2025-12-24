@@ -4,7 +4,7 @@ import { ChevronLeft, Sparkles, Mic, MicOff, Wifi, WifiOff, Play, Pause } from '
 import { api } from '../api';
 import { t } from '../i18n';
 import { startRecording } from '../utils/audio';
-import { LectureWebSocket, SubtitleMessage } from '../utils/ws';
+import { LectureWebSocket, SubtitleMessage, SubtitleZhMessage } from '../utils/ws';
 
 interface Lecture {
   id: number;
@@ -15,6 +15,14 @@ interface Lecture {
   ended_at: string | null;
 }
 
+interface Subtitle {
+  seq: number;
+  start_ms: number;
+  end_ms: number;
+  text_en: string;
+  text_zh?: string;
+}
+
 export function LectureDetailView() {
   const { id } = useParams<{ id: string }>();
   const [lecture, setLecture] = useState<Lecture | null>(null);
@@ -23,7 +31,7 @@ export function LectureDetailView() {
   const [activeTab, setActiveTab] = useState('transcript');
   const [isRecording, setIsRecording] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
-  const [subtitles, setSubtitles] = useState<SubtitleMessage[]>([]);
+  const [subtitles, setSubtitles] = useState<Subtitle[]>([]);
   const [wsError, setWsError] = useState('');
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -52,10 +60,17 @@ export function LectureDetailView() {
 
       setLecture(data);
 
-      // 拉取历史字幕
-      const { data: utterances } = await api.get<SubtitleMessage[]>(`/api/lectures/${id}/utterances`);
+      // 拉取历史字幕（后端返回的格式包含type/lecture_id等字段，需要转换）
+      const { data: utterances } = await api.get<any[]>(`/api/lectures/${id}/utterances`);
       if (utterances) {
-        setSubtitles(utterances);
+        const converted: Subtitle[] = utterances.map(u => ({
+          seq: u.seq,
+          start_ms: u.start_ms,
+          end_ms: u.end_ms,
+          text_en: u.text_en,
+          text_zh: u.text_zh || undefined,
+        }));
+        setSubtitles(converted);
       }
     })();
   }, [id]);
@@ -108,13 +123,33 @@ export function LectureDetailView() {
       const ws = new LectureWebSocket(
         parseInt(id),
         token,
-        (subtitle) => {
-          setSubtitles((prev) => [...prev, subtitle].sort((a, b) => a.seq - b.seq));
+        // onSubtitle: 收到英文字幕
+        (subtitle: SubtitleMessage) => {
+          const newSubtitle: Subtitle = {
+            seq: subtitle.seq,
+            start_ms: subtitle.start_ms,
+            end_ms: subtitle.end_ms,
+            text_en: subtitle.text_en,
+            // text_zh 暂时为 undefined，等待补丁
+          };
+          setSubtitles((prev) => [...prev, newSubtitle].sort((a, b) => a.seq - b.seq));
         },
+        // onSubtitleZh: 收到中文翻译补丁
+        (patch: SubtitleZhMessage) => {
+          setSubtitles((prev) =>
+            prev.map((s) =>
+              s.seq === patch.seq
+                ? { ...s, text_zh: patch.text_zh }
+                : s
+            )
+          );
+        },
+        // onError
         (err) => {
           setWsError(err);
           setIsConnected(false);
         },
+        // onInfo
         (info) => {
           console.log('WS Info:', info);
           setIsConnected(true);

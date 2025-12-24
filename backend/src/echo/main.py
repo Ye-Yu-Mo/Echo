@@ -324,14 +324,6 @@ async def lecture_socket(websocket: WebSocket, lecture_id: int) -> None:
                 if not text_en:
                     continue
 
-                # 翻译成中文（M2）
-                translate_result = await translate_text(text_en)
-                text_zh = translate_result.get("text", "")
-
-                # 处理翻译错误（不阻塞流程，仅记录）
-                if translate_result.get("code") == 3001:
-                    logger.warning(f"Translation failed: {translate_result.get('error')}")
-
                 # 生成 seq
                 seq = await next_seq(lecture_id)
 
@@ -341,7 +333,7 @@ async def lecture_socket(websocket: WebSocket, lecture_id: int) -> None:
                 end_ms = cumulative_ms + frame_duration_ms
                 cumulative_ms = end_ms
 
-                # 广播双语字幕
+                # 立即广播英文字幕（不等待翻译）
                 subtitle_msg = {
                     "type": "subtitle",
                     "lecture_id": lecture_id,
@@ -349,12 +341,40 @@ async def lecture_socket(websocket: WebSocket, lecture_id: int) -> None:
                     "start_ms": start_ms,
                     "end_ms": end_ms,
                     "text_en": text_en,
-                    "text_zh": text_zh,
                 }
                 await broadcast(lecture_id, subtitle_msg)
 
-                # 异步落库（不阻塞）
-                submit_task(create_utterance, pool, lecture_id, seq, start_ms, end_ms, text_en, text_zh, source="realtime")
+                # 异步落库英文字幕（text_zh=""）
+                submit_task(create_utterance, pool, lecture_id, seq, start_ms, end_ms, text_en, "", source="realtime")
+
+                # 异步提交翻译任务（不阻塞）
+                async def _translate_and_broadcast(
+                    lecture_id: int,
+                    seq: int,
+                    text_en: str,
+                ) -> None:
+                    """异步翻译任务：翻译 → 广播补丁 → 更新数据库"""
+                    from echo.translate import translate_text
+                    from echo.utterances import update_translation
+                    from echo.ws import broadcast_translation_patch
+
+                    # 调用翻译 API
+                    translate_result = await translate_text(text_en)
+                    text_zh = translate_result.get("text", "")
+
+                    # 翻译失败，仅记录日志
+                    if translate_result.get("code") == 3001:
+                        logger.warning(f"Translation failed for seq {seq}: {translate_result.get('error')}")
+                        return
+
+                    # 翻译成功，广播中文补丁
+                    if text_zh:
+                        await broadcast_translation_patch(lecture_id, seq, text_zh)
+
+                        # 更新数据库
+                        await update_translation(pool, lecture_id, seq, text_zh, source="realtime")
+
+                submit_task(_translate_and_broadcast, lecture_id, seq, text_en)
 
     except WebSocketDisconnect:
         pass

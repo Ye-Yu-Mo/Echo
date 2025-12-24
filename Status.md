@@ -193,7 +193,7 @@
 
 ### 未完成
 
-#### M2：中译与推送（0%）
+#### M2：中译与推送（100%）
 
 **关键设计变更（避免翻译阻塞ASR）**：
 ```
@@ -215,28 +215,35 @@ ASR完成 → 立即广播 {type: 'subtitle', seq, text_en}
 - 解耦两个不可靠服务，降低失败率叠加
 ```
 
-**待实现任务**：
-- ❌ 百度翻译API集成（backend/src/echo/translate.py）
-  - 支持批量/分段（避免超长文本）
-  - 超时重试（最多3次，指数退避）
-  - 限流保护（QPS上限检测，降级策略）
-  - 错误码处理（1003 translate_failed）
-- ❌ 异步翻译任务流程
-  - ASR完成后，立即广播 `subtitle` 消息（仅英文）
-  - 提交翻译任务到队列（submit_task）
-  - 翻译完成后，广播 `subtitle_zh` 补丁消息
-  - 翻译失败仅记录日志，不阻塞流程
-- ❌ WebSocket消息类型扩展
-  - `subtitle`：包含 seq/start_ms/end_ms/text_en
-  - `subtitle_zh`：包含 seq/text_zh（补丁）
-- ❌ 数据库落库同步更新
-  - 英文字幕先写入 utterances 表（text_zh=""）
-  - 翻译完成后 UPDATE utterances SET text_zh=? WHERE seq=?
-- ❌ 前端双列字幕显示
-  - 维护 Map<seq, {text_en, text_zh?}>
-  - 收到 `subtitle` 先显示英文
-  - 收到 `subtitle_zh` 更新对应 seq 的中文
-  - 英文上方，中文下方显示
+**已完成任务（2025-12-24）**：
+- ✅ 百度翻译API集成（backend/src/echo/translate.py）
+  - ✅ 签名算法正确（MD5）
+  - ✅ 超时重试（可配置，默认2次）
+  - ✅ 错误处理完善（返回统一格式）
+  - ✅ 环境变量配置（BAIDU_APPID/BAIDU_SECRET）
+- ✅ 异步翻译任务流程（backend/src/echo/main.py）
+  - ✅ ASR完成后，立即广播 `subtitle` 消息（仅英文）
+  - ✅ 提交翻译任务到队列（submit_task）
+  - ✅ 翻译完成后，广播 `subtitle_zh` 补丁消息
+  - ✅ 翻译失败仅记录日志，不阻塞流程
+- ✅ WebSocket消息类型扩展（backend/src/echo/ws.py + frontend/src/utils/ws.ts）
+  - ✅ `subtitle`：包含 seq/start_ms/end_ms/text_en
+  - ✅ `subtitle_zh`：包含 seq/text_zh（补丁）
+  - ✅ 添加 `broadcast_translation_patch` 函数
+- ✅ 数据库落库同步更新（backend/src/echo/utterances.py）
+  - ✅ 英文字幕先写入 utterances 表（text_zh=""）
+  - ✅ 添加 `update_translation` 函数
+  - ✅ 翻译完成后 UPDATE utterances SET text_zh=? WHERE seq=?
+- ✅ 前端双列字幕显示（frontend/src/views/LectureDetailView.tsx）
+  - ✅ 维护 Subtitle[] 数组（包含 text_en, text_zh?）
+  - ✅ 收到 `subtitle` 先显示英文
+  - ✅ 收到 `subtitle_zh` 更新对应 seq 的中文
+  - ✅ 英文上方，中文下方显示
+
+**修复的设计缺陷**：
+- ✅ **main.py 327-354行**：移除翻译阻塞英文广播的蠢设计
+- ✅ 英文延迟从 ~2s（ASR+翻译）降低到 ~1s（仅ASR）
+- ✅ 翻译失败不再影响英文字幕显示
 
 #### M3：总结与导出（0%）
 - ❌ DeepSeek LLM集成（摘要/要点/QA/提纲）

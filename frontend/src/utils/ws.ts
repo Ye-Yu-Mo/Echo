@@ -2,7 +2,7 @@
  * WebSocket 客户端
  * - 自动重连（指数退避）
  * - 心跳响应
- * - 字幕消息处理
+ * - 字幕消息处理（英文+中文补丁）
  */
 
 export interface SubtitleMessage {
@@ -12,7 +12,13 @@ export interface SubtitleMessage {
   start_ms: number;
   end_ms: number;
   text_en: string;
-  text_zh?: string;
+}
+
+export interface SubtitleZhMessage {
+  type: 'subtitle_zh';
+  lecture_id: number;
+  seq: number;
+  text_zh: string;
 }
 
 export interface ErrorMessage {
@@ -26,9 +32,10 @@ export interface InfoMessage {
   message: string;
 }
 
-export type WSMessage = SubtitleMessage | ErrorMessage | InfoMessage | { type: 'ping' };
+export type WSMessage = SubtitleMessage | SubtitleZhMessage | ErrorMessage | InfoMessage | { type: 'ping' };
 
 export type OnSubtitleCallback = (subtitle: SubtitleMessage) => void;
+export type OnSubtitleZhCallback = (patch: SubtitleZhMessage) => void;
 export type OnErrorCallback = (error: string) => void;
 export type OnInfoCallback = (info: string) => void;
 
@@ -43,6 +50,7 @@ export class LectureWebSocket {
     private lectureId: number,
     private token: string,
     private onSubtitle: OnSubtitleCallback,
+    private onSubtitleZh: OnSubtitleZhCallback,
     private onError: OnErrorCallback,
     private onInfo?: OnInfoCallback
   ) {}
@@ -68,6 +76,8 @@ export class LectureWebSocket {
 
         if (msg.type === 'subtitle') {
           this.onSubtitle(msg);
+        } else if (msg.type === 'subtitle_zh') {
+          this.onSubtitleZh(msg);
         } else if (msg.type === 'error') {
           this.onError(`${msg.message} (code: ${msg.code})`);
         } else if (msg.type === 'info' && this.onInfo) {

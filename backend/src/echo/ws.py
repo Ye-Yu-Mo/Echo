@@ -132,6 +132,24 @@ async def broadcast(
             await leave_room(lecture_id, ws)
 
 
+async def broadcast_translation_patch(lecture_id: int, seq: int, text_zh: str) -> None:
+    """
+    广播翻译补丁（仅包含中文翻译）
+
+    Args:
+        lecture_id: 讲座 ID
+        seq: 字幕序号
+        text_zh: 中文翻译
+    """
+    message = {
+        "type": "subtitle_zh",
+        "lecture_id": lecture_id,
+        "seq": seq,
+        "text_zh": text_zh,
+    }
+    await broadcast(lecture_id, message)
+
+
 async def heartbeat(websocket: WebSocket, interval: float = 30.0) -> None:
     """
     心跳检测任务

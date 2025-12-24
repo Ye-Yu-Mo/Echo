@@ -117,3 +117,33 @@ async def list_utterances(
     except Exception as exc:
         logger.error(f"Failed to list utterances: {exc}", exc_info=True)
         return []
+
+
+async def update_translation(
+    pool: Any,
+    lecture_id: int,
+    seq: int,
+    text_zh: str,
+    source: str = "realtime"
+) -> None:
+    """
+    更新字幕的中文翻译（异步翻译完成后调用）
+
+    Args:
+        pool: psycopg3 连接池
+        lecture_id: 讲座 ID
+        seq: 序号
+        text_zh: 中文翻译
+        source: 来源（realtime/reprocess）
+    """
+    sql = """
+        UPDATE utterances
+        SET text_zh = %s
+        WHERE lecture_id = %s AND seq = %s AND source = %s
+    """
+    try:
+        async with pool.connection() as conn:
+            await conn.execute(sql, (text_zh, lecture_id, seq, source))
+            logger.debug(f"Updated translation for lecture {lecture_id} seq {seq}")
+    except Exception as exc:
+        logger.error(f"Failed to update translation: {exc}", exc_info=True)
