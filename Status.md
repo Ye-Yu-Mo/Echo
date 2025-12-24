@@ -62,10 +62,31 @@
 5. ✅ 路径前缀误放行（middleware.py精确匹配）
 6. ✅ CORS预检失败（middleware.py跳过OPTIONS请求认证）
 
-**待修复的稳定性问题**（不影响基本功能）：
-1. ⚠️ DB异常处理缺失（连接异常未捕获，可能污染连接池）
-2. ⚠️ WS并发安全（房间set并发修改、广播无超时可能阻塞）
-3. ⚠️ shutdown阻塞（队列join可能卡死）
+## 技术债务与待修复Bug
+
+**✅ 已全部修复（2025-12-24）**：
+
+1. ✅ **DB异常处理缺失**（backend/src/echo/db.py、lectures.py、auth.py）
+   - 修复内容：
+     - 所有DB操作添加 `try-except psycopg.Error`
+     - 记录详细错误日志（包含上下文）
+     - 抛出 `RuntimeError` 供上层处理
+     - 涉及文件：db.py（init_db）、lectures.py（全部函数）、auth.py（全部函数）
+   - 影响：避免连接池污染，服务稳定性大幅提升
+
+2. ✅ **WS并发安全**（backend/src/echo/ws.py）
+   - 验证结果：
+     - ✅ 全局锁 `_lock` 保护 `_rooms` 和 `_seq_counters`
+     - ✅ 广播机制正确：先加锁拷贝连接列表，释放锁后并发发送（不阻塞）
+     - ✅ 广播超时机制：3s 超时，失败连接自动清理
+   - 结论：设计干净，无需修改
+
+3. ✅ **shutdown阻塞**（backend/src/echo/tasks.py）
+   - 修复内容：
+     - 添加超时机制（5s等待队列，2s等待workers退出）
+     - 超时后强制取消workers，避免卡死
+     - 记录超时告警日志
+   - 影响：服务可优雅退出，重启/部署不再hang住
 
 #### M0前端（100%）
 
@@ -173,9 +194,49 @@
 ### 未完成
 
 #### M2：中译与推送（0%）
-- ❌ 百度翻译API集成
-- ❌ 广播EN+ZH字幕
+
+**关键设计变更（避免翻译阻塞ASR）**：
+```
+旧设计（错误）：
+ASR → 翻译（阻塞） → 广播 {text_en, text_zh}
+问题：翻译失败/超时会阻塞英文字幕
+
+新设计（正确）：
+ASR完成 → 立即广播 {type: 'subtitle', seq, text_en}
+        ↓（异步提交到任务队列）
+    百度翻译API
+        ↓
+    广播 {type: 'subtitle_zh', seq, text_zh}（补丁消息）
+
+优势：
+- 英文字幕延迟不受翻译影响（~1s）
+- 翻译失败不影响英文可用性
+- 前端先显示英文，中文到达后填充
+- 解耦两个不可靠服务，降低失败率叠加
+```
+
+**待实现任务**：
+- ❌ 百度翻译API集成（backend/src/echo/translate.py）
+  - 支持批量/分段（避免超长文本）
+  - 超时重试（最多3次，指数退避）
+  - 限流保护（QPS上限检测，降级策略）
+  - 错误码处理（1003 translate_failed）
+- ❌ 异步翻译任务流程
+  - ASR完成后，立即广播 `subtitle` 消息（仅英文）
+  - 提交翻译任务到队列（submit_task）
+  - 翻译完成后，广播 `subtitle_zh` 补丁消息
+  - 翻译失败仅记录日志，不阻塞流程
+- ❌ WebSocket消息类型扩展
+  - `subtitle`：包含 seq/start_ms/end_ms/text_en
+  - `subtitle_zh`：包含 seq/text_zh（补丁）
+- ❌ 数据库落库同步更新
+  - 英文字幕先写入 utterances 表（text_zh=""）
+  - 翻译完成后 UPDATE utterances SET text_zh=? WHERE seq=?
 - ❌ 前端双列字幕显示
+  - 维护 Map<seq, {text_en, text_zh?}>
+  - 收到 `subtitle` 先显示英文
+  - 收到 `subtitle_zh` 更新对应 seq 的中文
+  - 英文上方，中文下方显示
 
 #### M3：总结与导出（0%）
 - ❌ DeepSeek LLM集成（摘要/要点/QA/提纲）

@@ -75,23 +75,38 @@ def start_workers(num_workers: int = 2) -> None:
     logger.info(f"Started {num_workers} workers")
 
 
-async def stop_workers() -> None:
-    """停止worker任务"""
+async def stop_workers(timeout: float = 5.0) -> None:
+    """
+    停止worker任务
+
+    Args:
+        timeout: 等待队列完成的最大时间（秒），超时后强制取消
+    """
     global _queue, _workers
 
     if _workers is None:
         return
 
-    # 等待队列中的任务完成
-    if _queue is not None:
-        await _queue.join()
+    # 先尝试等待队列完成（带超时）
+    if _queue is not None and not _queue.empty():
+        try:
+            await asyncio.wait_for(_queue.join(), timeout=timeout)
+            logger.info("All tasks completed before shutdown")
+        except asyncio.TimeoutError:
+            logger.warning(f"Queue did not finish within {timeout}s, forcing shutdown")
 
     # 取消所有worker
     for task in _workers:
         task.cancel()
 
-    # 等待worker退出
-    await asyncio.gather(*_workers, return_exceptions=True)
+    # 等待worker退出（带超时）
+    try:
+        await asyncio.wait_for(
+            asyncio.gather(*_workers, return_exceptions=True),
+            timeout=2.0
+        )
+    except asyncio.TimeoutError:
+        logger.error("Workers did not exit gracefully")
 
     _queue = None
     _workers = None

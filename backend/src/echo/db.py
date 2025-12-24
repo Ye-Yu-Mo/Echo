@@ -7,12 +7,16 @@
 """
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from typing import AsyncGenerator
 
+import psycopg
 from psycopg import AsyncConnection
 from psycopg_pool import AsyncConnectionPool
+
+logger = logging.getLogger(__name__)
 
 
 _pool: AsyncConnectionPool | None = None
@@ -50,13 +54,24 @@ async def get_conn() -> AsyncGenerator[AsyncConnection, None]:
 
 
 async def init_db() -> None:
-    """执行schema.sql初始化数据库表结构"""
+    """
+    执行schema.sql初始化数据库表结构
+
+    Raises:
+        FileNotFoundError: schema.sql 文件不存在
+        RuntimeError: 数据库初始化失败
+    """
     schema_path = Path(__file__).parent.parent / "schema.sql"
     if not schema_path.exists():
         raise FileNotFoundError(f"schema.sql not found at {schema_path}")
 
     sql = schema_path.read_text(encoding="utf-8")
 
-    async with get_pool().connection() as conn:
-        await conn.execute(sql)
-        await conn.commit()
+    try:
+        async with get_pool().connection() as conn:
+            await conn.execute(sql)
+            await conn.commit()
+            logger.info("Database initialized successfully")
+    except psycopg.Error as exc:
+        logger.error(f"DB error during init_db: {exc}", exc_info=True)
+        raise RuntimeError("Failed to initialize database") from exc

@@ -3,9 +3,14 @@
 """
 from __future__ import annotations
 
+import logging
 from typing import Any
 
+import psycopg
+
 from echo.db import get_conn
+
+logger = logging.getLogger(__name__)
 
 
 async def create_lecture(title: str, creator_id: int) -> dict[str, Any]:
@@ -13,83 +18,25 @@ async def create_lecture(title: str, creator_id: int) -> dict[str, Any]:
     创建讲座
 
     返回 {"id": int, "title": str, "creator_id": int, "status": str, "created_at": datetime}
+
+    Raises:
+        RuntimeError: 数据库操作失败
     """
-    async for conn in get_conn():
-        async with conn.cursor() as cur:
-            await cur.execute(
-                """
-                INSERT INTO lectures (title, creator_id, status)
-                VALUES (%s, %s, 'init')
-                RETURNING id, title, creator_id, status, created_at, ended_at
-                """,
-                (title, creator_id),
-            )
-            row = await cur.fetchone()
-            await conn.commit()
+    try:
+        async for conn in get_conn():
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """
+                    INSERT INTO lectures (title, creator_id, status)
+                    VALUES (%s, %s, 'init')
+                    RETURNING id, title, creator_id, status, created_at, ended_at
+                    """,
+                    (title, creator_id),
+                )
+                row = await cur.fetchone()
+                await conn.commit()
 
-        return {
-            "id": row[0],
-            "title": row[1],
-            "creator_id": row[2],
-            "status": row[3],
-            "created_at": row[4],
-            "ended_at": row[5],
-        }
-
-
-async def get_lecture(lecture_id: int) -> dict[str, Any] | None:
-    """
-    获取讲座详情
-
-    返回讲座信息或None（不存在或已软删除）
-    """
-    async for conn in get_conn():
-        async with conn.cursor() as cur:
-            await cur.execute(
-                """
-                SELECT id, title, creator_id, status, created_at, ended_at
-                FROM lectures
-                WHERE id = %s AND deleted_at IS NULL
-                """,
-                (lecture_id,),
-            )
-            row = await cur.fetchone()
-
-        if not row:
-            return None
-
-        return {
-            "id": row[0],
-            "title": row[1],
-            "creator_id": row[2],
-            "status": row[3],
-            "created_at": row[4],
-            "ended_at": row[5],
-        }
-
-
-async def list_lectures(user_id: int, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
-    """
-    列出用户创建的讲座列表
-
-    返回讲座列表（按创建时间倒序）
-    """
-    async for conn in get_conn():
-        async with conn.cursor() as cur:
-            await cur.execute(
-                """
-                SELECT id, title, creator_id, status, created_at, ended_at
-                FROM lectures
-                WHERE creator_id = %s AND deleted_at IS NULL
-                ORDER BY created_at DESC
-                LIMIT %s OFFSET %s
-                """,
-                (user_id, limit, offset),
-            )
-            rows = await cur.fetchall()
-
-        return [
-            {
+            return {
                 "id": row[0],
                 "title": row[1],
                 "creator_id": row[2],
@@ -97,8 +44,87 @@ async def list_lectures(user_id: int, limit: int = 50, offset: int = 0) -> list[
                 "created_at": row[4],
                 "ended_at": row[5],
             }
-            for row in rows
-        ]
+    except psycopg.Error as exc:
+        logger.error(f"DB error creating lecture: {exc}", exc_info=True)
+        raise RuntimeError("Failed to create lecture") from exc
+
+
+async def get_lecture(lecture_id: int) -> dict[str, Any] | None:
+    """
+    获取讲座详情
+
+    返回讲座信息或None（不存在或已软删除）
+
+    Raises:
+        RuntimeError: 数据库操作失败
+    """
+    try:
+        async for conn in get_conn():
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """
+                    SELECT id, title, creator_id, status, created_at, ended_at
+                    FROM lectures
+                    WHERE id = %s AND deleted_at IS NULL
+                    """,
+                    (lecture_id,),
+                )
+                row = await cur.fetchone()
+
+            if not row:
+                return None
+
+            return {
+                "id": row[0],
+                "title": row[1],
+                "creator_id": row[2],
+                "status": row[3],
+                "created_at": row[4],
+                "ended_at": row[5],
+            }
+    except psycopg.Error as exc:
+        logger.error(f"DB error getting lecture {lecture_id}: {exc}", exc_info=True)
+        raise RuntimeError("Failed to get lecture") from exc
+
+
+async def list_lectures(user_id: int, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
+    """
+    列出用户创建的讲座列表
+
+    返回讲座列表（按创建时间倒序）
+
+    Raises:
+        RuntimeError: 数据库操作失败
+    """
+    try:
+        async for conn in get_conn():
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """
+                    SELECT id, title, creator_id, status, created_at, ended_at
+                    FROM lectures
+                    WHERE creator_id = %s AND deleted_at IS NULL
+                    ORDER BY created_at DESC
+                    LIMIT %s OFFSET %s
+                    """,
+                    (user_id, limit, offset),
+                )
+                rows = await cur.fetchall()
+
+            return [
+                {
+                    "id": row[0],
+                    "title": row[1],
+                    "creator_id": row[2],
+                    "status": row[3],
+                    "created_at": row[4],
+                    "ended_at": row[5],
+                }
+                for row in rows
+            ]
+    except psycopg.Error as exc:
+        logger.error(f"DB error listing lectures for user {user_id}: {exc}", exc_info=True)
+        raise RuntimeError("Failed to list lectures") from exc
 
 
 async def update_lecture_status(lecture_id: int, status: str) -> bool:
@@ -106,19 +132,26 @@ async def update_lecture_status(lecture_id: int, status: str) -> bool:
     更新讲座状态
 
     返回True（成功）或False（讲座不存在）
+
+    Raises:
+        RuntimeError: 数据库操作失败
     """
-    async for conn in get_conn():
-        async with conn.cursor() as cur:
-            await cur.execute(
-                """
-                UPDATE lectures
-                SET status = %s
-                WHERE id = %s AND deleted_at IS NULL
-                """,
-                (status, lecture_id),
-            )
-            await conn.commit()
-            return cur.rowcount > 0
+    try:
+        async for conn in get_conn():
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """
+                    UPDATE lectures
+                    SET status = %s
+                    WHERE id = %s AND deleted_at IS NULL
+                    """,
+                    (status, lecture_id),
+                )
+                await conn.commit()
+                return cur.rowcount > 0
+    except psycopg.Error as exc:
+        logger.error(f"DB error updating lecture {lecture_id} status: {exc}", exc_info=True)
+        raise RuntimeError("Failed to update lecture status") from exc
 
 
 async def end_lecture(lecture_id: int) -> bool:
@@ -126,16 +159,23 @@ async def end_lecture(lecture_id: int) -> bool:
     结束讲座（设置ended_at，状态改为summarizing）
 
     返回True（成功）或False（讲座不存在）
+
+    Raises:
+        RuntimeError: 数据库操作失败
     """
-    async for conn in get_conn():
-        async with conn.cursor() as cur:
-            await cur.execute(
-                """
-                UPDATE lectures
-                SET status = 'summarizing', ended_at = NOW()
-                WHERE id = %s AND deleted_at IS NULL
-                """,
-                (lecture_id,),
-            )
-            await conn.commit()
-            return cur.rowcount > 0
+    try:
+        async for conn in get_conn():
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """
+                    UPDATE lectures
+                    SET status = 'summarizing', ended_at = NOW()
+                    WHERE id = %s AND deleted_at IS NULL
+                    """,
+                    (lecture_id,),
+                )
+                await conn.commit()
+                return cur.rowcount > 0
+    except psycopg.Error as exc:
+        logger.error(f"DB error ending lecture {lecture_id}: {exc}", exc_info=True)
+        raise RuntimeError("Failed to end lecture") from exc
